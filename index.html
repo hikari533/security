@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>排班表產生器</title>
+  <style>
+    /* 基本重置與字型設定 */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(to right, #e0f7fa, #fff);
+      padding: 20px;
+      color: #333;
+    }
+    h1, h2 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    /* 輸入區樣式 */
+    .input-area {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .input-area label {
+      margin: 0 8px;
+      font-size: 1.1em;
+    }
+    .input-area input {
+      padding: 4px 8px;
+      font-size: 1em;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      transition: border 0.3s;
+    }
+    .input-area input:focus {
+      border-color: #00796b;
+      outline: none;
+    }
+    .input-area button {
+      padding: 6px 16px;
+      font-size: 1em;
+      background-color: #00796b;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    .input-area button:hover {
+      background-color: #004d40;
+    }
+    /* 表格樣式 */
+    table {
+      width: 100%;
+      max-width: 1000px;
+      margin: 0 auto 20px auto;
+      border-collapse: collapse;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    th, td {
+      border: 1px solid #666;
+      padding: 8px;
+      text-align: center;
+      font-size: 0.95em;
+    }
+    thead th {
+      background-color: #00796b;
+      color: #fff;
+    }
+    .weekend {
+      color: #d32f2f;
+      font-weight: bold;
+    }
+    /* 各班別顏色區分 */
+    .shift-morning { background-color: #e0f7fa; }  /* 輕藍 */
+    .shift-standby { background-color: #e8f5e9; }  /* 輕綠 */
+    .shift-mid     { background-color: #fff9c4; }  /* 輕黃 */
+    .shift-late    { background-color: #ffecb3; }  /* 輕橙 */
+    .shift-rest    { background-color: #fce4ec; }  /* 輕粉 */
+    /* 休息天數統計樣式 */
+    #restSummary {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #f1f8e9;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #c5e1a5;
+    }
+  .creator {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  font-size: 24px;
+  font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="creator">製表人: 林順益</div>
+
+  <h1>中山區環保局守衛室</h1>
+  
+  <!-- 年份 / 月份輸入區 -->
+  <div class="input-area">
+    <label>年:
+      <input type="number" id="year" value="2024">
+    </label>
+    <label>月:
+      <input type="number" id="month" value="11">
+    </label>
+    <button onclick="generateSchedule()">產生班表</button>
+  </div>
+  
+  <!-- 員工名稱設定 -->
+  <div class="input-area">
+    <h2>員工設定 (若輸入框為空則顯示預設 A, B, C, D, E)</h2>
+    <label>A:
+      <input type="text" id="empA" placeholder="A">
+    </label>
+    <label>B:
+      <input type="text" id="empB" placeholder="B">
+    </label>
+    <label>C:
+      <input type="text" id="empC" placeholder="C">
+    </label>
+    <label>D:
+      <input type="text" id="empD" placeholder="D">
+    </label>
+    <label>E:
+      <input type="text" id="empE" placeholder="E">
+    </label>
+  </div>
+  
+  <!-- 班表呈現區 -->
+  <div id="schedule"></div>
+  
+  <!-- 當月休息天數統計 -->
+  <div id="restSummary"></div>
+  
+  <script>
+    // 取得最新的員工名稱，若輸入框為空，則採用預設值 A/B/C/D/E
+    function getEmployeeNames() {
+      return {
+        A: document.getElementById('empA').value.trim() || 'A',
+        B: document.getElementById('empB').value.trim() || 'B',
+        C: document.getElementById('empC').value.trim() || 'C',
+        D: document.getElementById('empD').value.trim() || 'D',
+        E: document.getElementById('empE').value.trim() || 'E'
+      };
+    }
+    
+    // 班表循環規則 (以字串方式表示循環，每一段代表 5 天)
+    const morningPattern = "AAAAABBBBBCCCCCDDDDDEEEEE";     // 早班 25 天循環 (起始日期：2024/11/1)
+    const standbyPattern = "00EEE00AAA00BBB00CCC00DDD";       // 待命 25 天循環，字元 '0' 表示空白
+    const midPattern     = "BBBBBCCCCCDDDDDEEEEEAAAAA";       // 中班 25 天循環 (起始日期：2024/10/30)
+    const latePattern    = "CCCCCDDDDDEEEEEAAAAABBBBB";         // 大夜 25 天循環 (起始日期：2024/10/28)
+    
+    // 各班別的起始日期 (注意：JavaScript 中月份從 0 開始計算)
+    const morningStart = new Date(2024, 10, 1); // 2024/11/1
+    const midStart     = new Date(2024, 9, 30); // 2024/10/30
+    const lateStart    = new Date(2024, 9, 28); // 2024/10/28
+    
+    // 依照使用者設定的年月產生班表
+    function generateSchedule() {
+      const year = parseInt(document.getElementById('year').value);
+      const month = parseInt(document.getElementById('month').value) - 1; // JS 月份從 0 起算
+      const empNames = getEmployeeNames();
+      
+      // 本月天數
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      
+      // 用來統計各員工休息天數 (若一天中該員工未出現於任何班表，就視為休息)
+      let restCount = {A: 0, B: 0, C: 0, D: 0, E: 0};
+      
+      // 建立表頭 (日期與星期，周六日標紅)
+      let html = "<table><thead><tr><th>班別</th>";
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(year, month, day);
+        const weekday = d.getDay(); // 0: 日, 6: 六
+        const weekdayStr = ["日", "一", "二", "三", "四", "五", "六"][weekday];
+        if (weekday === 0 || weekday === 6) {
+          html += `<th class="weekend">${day}<br>${weekdayStr}</th>`;
+        } else {
+          html += `<th>${day}<br>${weekdayStr}</th>`;
+        }
+      }
+      html += "</tr></thead><tbody>";
+      
+      // 早班 (早班與待命在同一張表中)
+      html += "<tr class='shift-morning'><td>早班</td>";
+      for (let day = 1; day <= daysInMonth; day++) {
+        const current = new Date(year, month, day);
+        let cell = "";
+        if (current >= morningStart) {
+          const diff = Math.floor((current - morningStart) / (1000 * 60 * 60 * 24));
+          const index = diff % morningPattern.length;
+          const letter = morningPattern.charAt(index);
+          cell = empNames[letter] || letter;
+        }
+        html += `<td>${cell}</td>`;
+      }
+      html += "</tr>";
+      
+      // 待命
+      html += "<tr class='shift-standby'><td>待命</td>";
+      for (let day = 1; day <= daysInMonth; day++) {
+        const current = new Date(year, month, day);
+        let cell = "";
+        if (current >= morningStart) { // 此處以早班起始日作為待命起始判斷
+          const diff = Math.floor((current - morningStart) / (1000 * 60 * 60 * 24));
+          const index = diff % standbyPattern.length;
+          const char = standbyPattern.charAt(index);
+          if (char !== '0') {
+            cell = empNames[char] || char;
+          }
+        }
+        html += `<td>${cell}</td>`;
+      }
+      html += "</tr>";
+      
+      // 中班
+      html += "<tr class='shift-mid'><td>中班</td>";
+      for (let day = 1; day <= daysInMonth; day++) {
+        const current = new Date(year, month, day);
+        let cell = "";
+        if (current >= midStart) {
+          const diff = Math.floor((current - midStart) / (1000 * 60 * 60 * 24));
+          const index = diff % midPattern.length;
+          const letter = midPattern.charAt(index);
+          cell = empNames[letter] || letter;
+        }
+        html += `<td>${cell}</td>`;
+      }
+      html += "</tr>";
+      
+      // 大夜
+      html += "<tr class='shift-late'><td>大夜</td>";
+      for (let day = 1; day <= daysInMonth; day++) {
+        const current = new Date(year, month, day);
+        let cell = "";
+        if (current >= lateStart) {
+          const diff = Math.floor((current - lateStart) / (1000 * 60 * 60 * 24));
+          const index = diff % latePattern.length;
+          const letter = latePattern.charAt(index);
+          cell = empNames[letter] || letter;
+        }
+        html += `<td>${cell}</td>`;
+      }
+      html += "</tr>";
+      
+      // 休息：若當日該員工未出現於上述任何班別，則顯示在休息欄位
+      html += "<tr class='shift-rest'><td>休息</td>";
+      for (let day = 1; day <= daysInMonth; day++) {
+        const current = new Date(year, month, day);
+        let assigned = {};
+        // 早班
+        if (current >= morningStart) {
+          let diff = Math.floor((current - morningStart) / (1000 * 60 * 60 * 24));
+          let index = diff % morningPattern.length;
+          let letter = morningPattern.charAt(index);
+          assigned[letter] = true;
+        }
+        // 待命
+        if (current >= morningStart) {
+          let diff = Math.floor((current - morningStart) / (1000 * 60 * 60 * 24));
+          let index = diff % standbyPattern.length;
+          let char = standbyPattern.charAt(index);
+          if (char !== '0') {
+            assigned[char] = true;
+          }
+        }
+        // 中班
+        if (current >= midStart) {
+          let diff = Math.floor((current - midStart) / (1000 * 60 * 60 * 24));
+          let index = diff % midPattern.length;
+          let letter = midPattern.charAt(index);
+          assigned[letter] = true;
+        }
+        // 大夜
+        if (current >= lateStart) {
+          let diff = Math.floor((current - lateStart) / (1000 * 60 * 60 * 24));
+          let index = diff % latePattern.length;
+          let letter = latePattern.charAt(index);
+          assigned[letter] = true;
+        }
+        
+        // 若某員工未在當天出現，則視為休息
+        let restStr = "";
+        for (let key of ['A', 'B', 'C', 'D', 'E']) {
+          if (!assigned[key]) {
+            restStr += (empNames[key] || key) + " ";
+            restCount[key]++;
+          }
+        }
+        html += `<td>${restStr}</td>`;
+      }
+      html += "</tr>";
+      
+      html += "</tbody></table>";
+      
+      document.getElementById('schedule').innerHTML = html;
+      
+      // 顯示當月各員工休息天數
+      let summary = "<h2>當月休息天數</h2><ul>";
+      for (let key of ['A', 'B', 'C', 'D', 'E']) {
+        summary += `<li>${empNames[key]}: ${restCount[key]} 天</li>`;
+      }
+      summary += "</ul>";
+      document.getElementById('restSummary').innerHTML = summary;
+    }
+  </script>
+
+  <script>
+  // 初始化當前年月
+  function initializeDate() {
+    const today = new Date();
+    document.getElementById('year').value = today.getFullYear();
+    document.getElementById('month').value = today.getMonth() + 1; // 月份是 0-11，所以要 +1
+  }
+
+  // 當頁面加載完成後執行
+  window.onload = function () {
+    initializeDate();
+    generateSchedule(); // 頁面載入時自動產生當月班表
+  };
+  </script>
+
+  <script>
+  // 預設的員工名稱
+  const defaultNames = {
+    A: "亡國腎",
+    B: "高原益",
+    C: "林順益",
+    D: "陳萬吉",
+    E: "林育生"
+  };
+
+  function initializeEmployees() {
+    document.getElementById('empA').value = defaultNames.A;
+    document.getElementById('empB').value = defaultNames.B;
+    document.getElementById('empC').value = defaultNames.C;
+    document.getElementById('empD').value = defaultNames.D;
+    document.getElementById('empE').value = defaultNames.E;
+  }
+
+  // 頁面載入時執行
+  window.onload = function () {
+    initializeDate();  // 設定預設的年月
+    initializeEmployees(); // 設定預設的員工名稱
+    generateSchedule(); // 頁面載入時自動產生當月班表
+  };
+  </script>
+
+</body>
+</html>
